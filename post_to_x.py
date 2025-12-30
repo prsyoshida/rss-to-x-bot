@@ -10,6 +10,8 @@ POSTED_FILE = "posted.json"
 MAX_LEN = 300
 
 def clean_html(text):
+    if not text:
+        return ""
     return BeautifulSoup(text, "html.parser").get_text(" ").replace("\n", " ").strip()
 
 
@@ -28,14 +30,14 @@ posted = load_posted()
 
 entry = next(e for e in feed.entries if e.id not in posted)
 
-summary = entry.get("summary", "").replace("\n", " ").strip()
-content = entry.get("content", [{}])[0].get("value", "").replace("\n", " ").strip()
+summary = clean_html(entry.get("summary", ""))
+description = clean_html(entry.get("description", ""))
+content = clean_html(entry.get("content", [{}])[0].get("value", ""))
 
-# summary が短すぎる場合は本文を使う
-if len(summary) < 120:
-    text = content or entry.title
-else:
-    text = summary
+# 一番情報量が多いものを使う（HTMLタグ完全除去）
+candidates = [summary, description, content]
+text = max(candidates, key=len) or entry.title
+
 
 tweet = f"{text}\n\n続きはこちら\n{entry.link}"
 
