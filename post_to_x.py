@@ -2,10 +2,16 @@ import feedparser
 import json
 import os
 import tweepy
+from bs4 import BeautifulSoup
+
 
 RSS_URL = "https://dr-liposuction.jp/feed/"
 POSTED_FILE = "posted.json"
 MAX_LEN = 300
+
+def clean_html(text):
+    return BeautifulSoup(text, "html.parser").get_text(" ").replace("\n", " ").strip()
+
 
 def load_posted():
     if os.path.exists(POSTED_FILE):
