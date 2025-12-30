@@ -37,9 +37,6 @@ if len(summary) < 120:
 else:
     text = summary
 
-
-text = raw_text.replace("\n", " ").strip()
-
 tweet = f"{text}\n\n続きはこちら\n{entry.link}"
 
 
