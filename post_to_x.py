@@ -22,8 +22,16 @@ posted = load_posted()
 
 entry = next(e for e in feed.entries if e.id not in posted)
 
-text = entry.get("summary") or entry.get("content", [{}])[0].get("value", entry.title).replace("\n", " ").strip()
+raw_text = (
+    entry.get("summary")
+    or entry.get("content", [{}])[0].get("value", "")
+    or entry.title
+)
+
+text = raw_text.replace("\n", " ").strip()
+
 tweet = f"{text}\n\n続きはこちら\n{entry.link}"
+
 
 if len(tweet) > MAX_LEN:
     tweet = tweet[:MAX_LEN].rsplit("。", 1)[0] + "。"
