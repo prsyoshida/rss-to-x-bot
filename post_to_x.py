@@ -5,7 +5,7 @@ import tweepy
 
 RSS_URL = "https://dr-liposuction.jp/feed/"
 POSTED_FILE = "posted.json"
-MAX_LEN = 260
+MAX_LEN = 300
 
 def load_posted():
     if os.path.exists(POSTED_FILE):
@@ -26,7 +26,8 @@ text = entry.get("summary") or entry.get("content", [{}])[0].get("value", entry.
 tweet = f"{text}\n\n続きはこちら\n{entry.link}"
 
 if len(tweet) > MAX_LEN:
-    tweet = tweet[:MAX_LEN] + "..."
+    tweet = tweet[:MAX_LEN].rsplit("。", 1)[0] + "。"
+
 
 client = tweepy.Client(
     consumer_key=os.environ["API_KEY"],
