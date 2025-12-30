@@ -22,11 +22,15 @@ posted = load_posted()
 
 entry = next(e for e in feed.entries if e.id not in posted)
 
-raw_text = (
-    entry.get("summary")
-    or entry.get("content", [{}])[0].get("value", "")
-    or entry.title
-)
+summary = entry.get("summary", "").replace("\n", " ").strip()
+content = entry.get("content", [{}])[0].get("value", "").replace("\n", " ").strip()
+
+# summary が短すぎる場合は本文を使う
+if len(summary) < 120:
+    text = content or entry.title
+else:
+    text = summary
+
 
 text = raw_text.replace("\n", " ").strip()
 
