@@ -3,6 +3,7 @@ import json
 import os
 import tweepy
 from bs4 import BeautifulSoup
+import re
 
 
 RSS_URL = "https://dr-liposuction.jp/feed/"
@@ -38,7 +39,11 @@ content = clean_html(entry.get("content", [{}])[0].get("value", ""))
 candidates = [summary, description, content]
 text = max(candidates, key=len) or entry.title
 
-import re
+
+
+# 参考文献番号のような引用 [1], [1,2], [1-7], ［1–7］ を削除
+text = re.sub(r"[［\[]\s*\d+(?:\s*[-–,]\s*\d+)*\s*[］\]]", "", text)
+
 
 MAX_LEN = 280  # まずは280で運用（長ければ下で自動調整）
 
