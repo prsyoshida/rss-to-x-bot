@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import feedparser
 import requests
 import tweepy
@@ -9,10 +10,11 @@ from bs4 import BeautifulSoup
 # 設定
 # ============================
 RSS_URL = "https://dr-liposuction.jp/feed/"  # あなたのRSS（必要なら変更）
-POSTED_FILE = "posted.json"                  # 「投稿済み記事ID」を保存するファイル（同じ記事を二重投稿しないため）
+POSTED_FILE = "posted.json"                  # 投稿済みを記録するファイル（同じ記事を二重投稿しないため）
+DESC_LIMIT = 60                              # 説明文（日本語）を何文字までにするか
 
 # ============================
-# posted.json（投稿済み管理）の読み書き
+# 投稿済み（posted.json）の読み書き
 # ============================
 def load_posted():
     """posted.json から投稿済みIDリストを読み込む"""
@@ -30,7 +32,61 @@ def save_posted(data):
         json.dump(data, f, ensure_ascii=False)
 
 # ============================
-# WebページからOGP情報を取得（扉絵/説明文）
+# 文字整形（説明文用）
+# ============================
+def shorten_ja(text: str, limit: int = 60) -> str:
+    """日本語説明文を指定文字数に収める（長ければ末尾を…にする）"""
+    t = (text or "").strip()
+    t = re.sub(r"\s+", " ", t)
+    if len(t) <= limit:
+        return t
+    return t[:limit].rstrip("、。") + "…"
+
+def clean_html_to_text(html: str) -> str:
+    """HTMLをテキストにして余計な空白を整える"""
+    if not html:
+        return ""
+    return BeautifulSoup(html, "html.parser").get_text(" ").strip()
+
+# ============================
+# RSSから「扉絵（画像URL）」を拾う（最重要）
+# ============================
+def get_image_url_from_rss_entry(entry) -> str:
+    """
+    WordPress RSSに含まれる画像情報を優先して拾う
+    - media:content
+    - media:thumbnail
+    - enclosure（links）
+    """
+    # 1) media_content
+    mc = getattr(entry, "media_content", None)
+    if mc and isinstance(mc, list) and mc:
+        url = mc[0].get("url")
+        if url:
+            return url
+
+    # 2) media_thumbnail
+    mt = getattr(entry, "media_thumbnail", None)
+    if mt and isinstance(mt, list) and mt:
+        url = mt[0].get("url")
+        if url:
+            return url
+
+    # 3) links の enclosure
+    links = getattr(entry, "links", None)
+    if links and isinstance(links, list):
+        for l in links:
+            if l.get("rel") == "enclosure":
+                href = l.get("href")
+                typ = (l.get("type") or "").lower()
+                if href and (typ.startswith("image/") or href.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))):
+                    return href
+
+    return ""
+
+# ============================
+# 記事ページからOGP（保険：取れれば使う）
+# ※ WAF/Cloudflare等で取得できない場合があるので必須にはしない
 # ============================
 def fetch_html(url: str) -> str:
     """URLのHTMLを取得（失敗したら空文字）"""
@@ -38,7 +94,11 @@ def fetch_html(url: str) -> str:
         r = requests.get(
             url,
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            allow_redirects=True,
         )
         r.raise_for_status()
         return r.text
@@ -46,18 +106,26 @@ def fetch_html(url: str) -> str:
         return ""
 
 def get_og_image_url(article_url: str) -> str:
-    """記事ページから og:image（扉絵URL）を取得"""
+    """記事ページから og:image（扉絵URL）を取得（取れなければ空文字）"""
     html = fetch_html(article_url)
     if not html:
         return ""
     soup = BeautifulSoup(html, "html.parser")
+
+    # og:image
     tag = soup.find("meta", property="og:image")
     if tag and tag.get("content"):
         return tag["content"].strip()
+
+    # og:image:secure_url
+    tag = soup.find("meta", property="og:image:secure_url")
+    if tag and tag.get("content"):
+        return tag["content"].strip()
+
     return ""
 
 def get_og_description(article_url: str) -> str:
-    """記事ページから og:description（説明文）を取得"""
+    """記事ページから og:description（説明文）を取得（取れなければ空文字）"""
     html = fetch_html(article_url)
     if not html:
         return ""
@@ -67,6 +135,9 @@ def get_og_description(article_url: str) -> str:
         return tag["content"].strip()
     return ""
 
+# ============================
+# 画像ダウンロード（Xに添付するため）
+# ============================
 def download_image(url: str, save_path: str) -> bool:
     """画像URLをダウンロードして保存（成功したらTrue）"""
     try:
@@ -74,13 +145,17 @@ def download_image(url: str, save_path: str) -> bool:
             url,
             timeout=25,
             stream=True,
-            headers={"User-Agent": "Mozilla/5.0"},
+            allow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                # 画像直リンクを弾くサイト対策（Refererを付ける）
+                "Referer": "https://dr-liposuction.jp/",
+            },
         )
         r.raise_for_status()
 
-        # Content-Typeが画像じゃなければ弾く
         ctype = (r.headers.get("Content-Type") or "").lower()
-        if "image" not in ctype:
+        if not ctype.startswith("image/"):
             return False
 
         with open(save_path, "wb") as f:
@@ -88,7 +163,8 @@ def download_image(url: str, save_path: str) -> bool:
                 if chunk:
                     f.write(chunk)
         return True
-    except Exception:
+    except Exception as e:
+        print("download_image 失敗:", repr(e))
         return False
 
 # ============================
@@ -106,16 +182,6 @@ def pick_next_entry(feed, posted_ids):
         if eid not in posted_ids:
             return e, eid
     return None, None
-
-# ============================
-# 文字を短く整える（説明文）
-# ============================
-def shorten_ja(text: str, limit: int = 60) -> str:
-    """日本語説明文を指定文字数に収める（長ければ末尾を…にする）"""
-    t = (text or "").strip().replace("\n", " ")
-    if len(t) <= limit:
-        return t
-    return t[:limit].rstrip("、。") + "…"
 
 # ============================
 # メイン処理
@@ -136,38 +202,28 @@ def main():
 
     title = (entry.get("title") or "").strip()
     link = (entry.get("link") or "").strip()
-
     if not title or not link:
         raise RuntimeError("RSS項目に title または link がありません。")
 
-    # 4) 日本語の説明文（OGP description → RSS summary の順で使う）
+    # 4) 日本語の説明文（優先順位：OGP description → RSS summary）
+    # ※ 取れない場合もあるのでRSS summaryを必ず持っておく
     description = get_og_description(link)
     if not description:
-        description = (entry.get("summary") or "").strip()
-    description = shorten_ja(description, limit=60)
+        # RSSのsummaryはHTMLの場合があるのでテキスト化
+        description = clean_html_to_text(entry.get("summary", ""))
+    description = shorten_ja(description, limit=DESC_LIMIT)
 
-    # 5) ツイート本文（題名＋説明文＋続きはこちら＋リンク）
-    #    ※「全文はこちら」など好みに応じて変更OK
+    # 5) ツイート本文（題名＋説明文＋続きはこちら！＋リンク）
     tweet_text = f"{title}\n{description}\n\n続きはこちら！\n{link}"
 
-    # 6) 環境変数（GitHub Secrets）からキーを読む
-    #    GitHub Secrets:
-    #    API_KEY / API_SECRET / ACCESS_TOKEN / ACCESS_TOKEN_SECRET
+    # 6) 認証（v1.1で投稿＆画像アップロード）
+    # GitHub Secrets:
+    # API_KEY / API_SECRET / ACCESS_TOKEN / ACCESS_TOKEN_SECRET
     api_key = os.environ["API_KEY"]
     api_secret = os.environ["API_SECRET"]
     access_token = os.environ["ACCESS_TOKEN"]
     access_token_secret = os.environ["ACCESS_TOKEN_SECRET"]
 
-    # 7) v2（投稿用）クライアント
-    client_v2 = tweepy.Client(
-        consumer_key=api_key,
-        consumer_secret=api_secret,
-        access_token=access_token,
-        access_token_secret=access_token_secret,
-    )
-
-    # 8) v1.1（画像アップロード用）API
-    #    ※Xは画像アップロードがv1.1のほうが扱いやすいので併用します
     auth = tweepy.OAuth1UserHandler(
         api_key,
         api_secret,
@@ -176,15 +232,16 @@ def main():
     )
     api_v1 = tweepy.API(auth)
 
-    # 9) 扉絵（og:image）を取得して添付（取れなければ画像なしで投稿）
-    media_id = None
-    og_img = get_og_image_url(link)
-    print("og:image =", og_img)
+    # 7) 扉絵（画像URL）を取得
+    # まずRSSから拾う（最優先）。取れない場合だけOGPを保険で見る。
+    img_url = get_image_url_from_rss_entry(entry) or get_og_image_url(link)
+    print("image_url =", img_url)
 
+    media_id = None
     tmp_path = "/tmp/og_image.jpg"
 
-    if og_img:
-        ok = download_image(og_img, tmp_path)
+    if img_url:
+        ok = download_image(img_url, tmp_path)
         print("download_image =", ok)
 
         if ok:
@@ -193,35 +250,27 @@ def main():
                 media_id = media.media_id_string
                 print("media_id =", media_id)
             except Exception as e:
-                print("media_upload failed:", repr(e))
+                print("画像アップロードに失敗しました。画像なしで投稿します。理由:", repr(e))
     else:
-        print("og:image が取得できませんでした（空です）")
+        print("画像URLが取得できませんでした（空です）")
 
-
-
-    # 10) 投稿（画像があれば添付）
+    # 8) 投稿（v1.1で実施：/2/tweets がCloudflare等で弾かれる回避策）
     try:
         if media_id:
-            client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
+            api_v1.update_status(status=tweet_text, media_ids=[media_id])
+            print("画像付きで投稿しました（v1.1）。")
         else:
-            client_v2.create_tweet(text=tweet_text)
-        print("投稿処理が正常に完了しました")
- 
-    except tweepy.errors.Forbidden as e:
-        print("403 Forbidden が発生しました")
-        try:
-            print("status:", e.response.status_code)
-            print("body:", e.response.text)
-        except Exception:
-            pass
+            api_v1.update_status(status=tweet_text)
+            print("画像なしで投稿しました（v1.1）。")
+    except Exception as e:
+        # 失敗時はここで止めて、posted.jsonに記録しない
+        print("投稿に失敗しました。理由:", repr(e))
         raise
 
-
-
-    # 11) 投稿済みとして記録
+    # 9) 投稿済みとして記録
     posted.append(entry_id)
     save_posted(posted)
-    print(f"投稿済みIDを保存しました: {entry_id}")
+    print("投稿済みIDを保存しました:", entry_id)
 
 if __name__ == "__main__":
     main()
