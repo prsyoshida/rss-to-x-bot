@@ -177,25 +177,26 @@ def main():
     api_v1 = tweepy.API(auth)
 
     # 9) 扉絵（og:image）を取得して添付（取れなければ画像なしで投稿）
-   media_id = None
-　　og_img = get_og_image_url(link)
-　　print("og:image =", og_img)
+    media_id = None
+    og_img = get_og_image_url(link)
+    print("og:image =", og_img)
 
-　　tmp_path = "/tmp/og_image.jpg"
+    tmp_path = "/tmp/og_image.jpg"
 
-　　if og_img:
-　　    ok = download_image(og_img, tmp_path)
-　　    print("download_image =", ok)
+    if og_img:
+        ok = download_image(og_img, tmp_path)
+        print("download_image =", ok)
 
-　　    if ok:
-　　        try:
-　　            media = api_v1.media_upload(filename=tmp_path)
-　　            media_id = media.media_id_string
-　　            print("media_id =", media_id)
-　　        except Exception as e:
-　　            print("media_upload failed:", repr(e))
-　　else:
-　　    print("og:image が取得できませんでした（空です）")
+        if ok:
+            try:
+                media = api_v1.media_upload(filename=tmp_path)
+                media_id = media.media_id_string
+                print("media_id =", media_id)
+            except Exception as e:
+                print("media_upload failed:", repr(e))
+    else:
+        print("og:image が取得できませんでした（空です）")
+
 
 
     # 10) 投稿（画像があれば添付）
