@@ -191,20 +191,21 @@ def main():
 
     # 10) 投稿（画像があれば添付）
     try:
-    if media_id:
-        client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
-    else:
-        client_v2.create_tweet(text=tweet_text)
-except tweepy.errors.Forbidden as e:
-    # 403の理由をログに出す（ここが重要）
-    print("403 Forbidden になりました。Xの応答内容を表示します。")
-    try:
-        print("status:", e.response.status_code)
-        print("body:", e.response.text)
-        print("headers:", dict(e.response.headers))
-    except Exception:
-        pass
-    raise
+        if media_id:
+            client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
+        else:
+            client_v2.create_tweet(text=tweet_text)
+        print("投稿処理が正常に完了しました")
+ 
+    except tweepy.errors.Forbidden as e:
+        print("403 Forbidden が発生しました")
+        try:
+            print("status:", e.response.status_code)
+            print("body:", e.response.text)
+        except Exception:
+            pass
+        raise
+
 
 
     # 11) 投稿済みとして記録
