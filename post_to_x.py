@@ -1,115 +1,206 @@
-import feedparser
-import json
 import os
-import tweepy
+import json
+import feedparser
 import requests
+import tweepy
 from bs4 import BeautifulSoup
-import re
 
+# ============================
+# 設定
+# ============================
+RSS_URL = "https://dr-liposuction.jp/feed/"  # あなたのRSS（必要なら変更）
+POSTED_FILE = "posted.json"                  # 「投稿済み記事ID」を保存するファイル（同じ記事を二重投稿しないため）
 
-RSS_URL = "https://dr-liposuction.jp/feed/"
-POSTED_FILE = "posted.json"
-MAX_LEN = 300
-
-def clean_html(text):
-    if not text:
-        return ""
-    return BeautifulSoup(text, "html.parser").get_text(" ").replace("\n", " ").strip()
-
-
+# ============================
+# posted.json（投稿済み管理）の読み書き
+# ============================
 def load_posted():
+    """posted.json から投稿済みIDリストを読み込む"""
     if os.path.exists(POSTED_FILE):
-        with open(POSTED_FILE, "r") as f:
-            return json.load(f)
+        with open(POSTED_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
     return []
 
 def save_posted(data):
-    with open(POSTED_FILE, "w") as f:
-        json.dump(data, f)
+    """投稿済みIDリストを posted.json に保存する"""
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
 
-feed = feedparser.parse(RSS_URL)
-posted = load_posted()
+# ============================
+# WebページからOGP情報を取得（扉絵/説明文）
+# ============================
+def fetch_html(url: str) -> str:
+    """URLのHTMLを取得（失敗したら空文字）"""
+    try:
+        r = requests.get(
+            url,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        r.raise_for_status()
+        return r.text
+    except Exception:
+        return ""
 
-entry = next(e for e in feed.entries if e.id not in posted)
+def get_og_image_url(article_url: str) -> str:
+    """記事ページから og:image（扉絵URL）を取得"""
+    html = fetch_html(article_url)
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.find("meta", property="og:image")
+    if tag and tag.get("content"):
+        return tag["content"].strip()
+    return ""
 
-summary = clean_html(entry.get("summary", ""))
-description = clean_html(entry.get("description", ""))
-content = clean_html(entry.get("content", [{}])[0].get("value", ""))
+def get_og_description(article_url: str) -> str:
+    """記事ページから og:description（説明文）を取得"""
+    html = fetch_html(article_url)
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.find("meta", property="og:description")
+    if tag and tag.get("content"):
+        return tag["content"].strip()
+    return ""
 
-# 一番情報量が多いものを使う（HTMLタグ完全除去）
-candidates = [summary, description, content]
-text = max(candidates, key=len) or entry.title
+def download_image(url: str, save_path: str) -> bool:
+    """画像URLをダウンロードして保存（成功したらTrue）"""
+    try:
+        r = requests.get(
+            url,
+            timeout=25,
+            stream=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        r.raise_for_status()
 
+        # Content-Typeが画像じゃなければ弾く
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if "image" not in ctype:
+            return False
 
+        with open(save_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 64):
+                if chunk:
+                    f.write(chunk)
+        return True
+    except Exception:
+        return False
 
-# 参考文献番号のような引用 [1], [1,2], [1-7], ［1–7］ を削除
-text = re.sub(r"[［\[]\s*\d+(?:\s*[-–,]\s*\d+)*\s*[］\]]", "", text)
+# ============================
+# RSSから「未投稿の最新記事」を選ぶ
+# ============================
+def pick_next_entry(feed, posted_ids):
+    """
+    RSSの上から順に見て、posted.jsonに入っていない記事を1つ返す
+    """
+    for e in feed.entries:
+        # RSSによっては e.id が無いので link も候補にする
+        eid = getattr(e, "id", None) or getattr(e, "link", None)
+        if not eid:
+            continue
+        if eid not in posted_ids:
+            return e, eid
+    return None, None
 
+# ============================
+# 文字を短く整える（説明文）
+# ============================
+def shorten_ja(text: str, limit: int = 60) -> str:
+    """日本語説明文を指定文字数に収める（長ければ末尾を…にする）"""
+    t = (text or "").strip().replace("\n", " ")
+    if len(t) <= limit:
+        return t
+    return t[:limit].rstrip("、。") + "…"
 
-MAX_LEN = 280  # まずは280で運用（長ければ下で自動調整）
+# ============================
+# メイン処理
+# ============================
+def main():
+    # 1) RSSを取得
+    feed = feedparser.parse(RSS_URL)
 
-def normalize_jp(s: str) -> str:
-    s = re.sub(r"\s+", " ", s)
-    s = s.replace("［", "[").replace("］", "]")
-    return s.strip()
+    # 2) 投稿済みIDを読み込む
+    posted = load_posted()
 
-def to_sentences(s: str):
-    s = normalize_jp(s)
-    # 見出しっぽい語や目次ノイズを軽く除去
-    s = re.sub(r"(目次|Toggle|重要)", "", s)
-    # 句点で分割
-    parts = [p.strip() for p in s.split("。") if p.strip()]
-    return parts
+    # 3) 未投稿の最新記事を取得
+    entry, entry_id = pick_next_entry(feed, posted)
+    if not entry:
+        # 未投稿が無ければ何もしない（正常終了）
+        print("未投稿の記事がありません（投稿は行いませんでした）。")
+        return
 
-# --- ここまでに作った text（本文候補）を使う前提 ---
+    title = (entry.get("title") or "").strip()
+    link = (entry.get("link") or "").strip()
 
-sentences = to_sentences(text)
+    if not title or not link:
+        raise RuntimeError("RSS項目に title または link がありません。")
 
-# タイトルを先頭に
-title = normalize_jp(entry.title)
+    # 4) 日本語の説明文（OGP description → RSS summary の順で使う）
+    description = get_og_description(link)
+    if not description:
+        description = (entry.get("summary") or "").strip()
+    description = shorten_ja(description, limit=60)
 
-# 本文から「短く読みやすい」2〜3文だけ拾う（長すぎる文はカット）
-picked = []
-for p in sentences:
-    if len(p) < 15:
-        continue
-    if len(p) > 70:
-        p = p[:70].rstrip("、")  # 長い文は短縮
-    picked.append(p)
-    if len(picked) >= 3:
-        break
+    # 5) ツイート本文（題名＋説明文＋続きはこちら＋リンク）
+    #    ※「全文はこちら」など好みに応じて変更OK
+    tweet_text = f"{title}\n{description}\n\n続きはこちら！\n{link}"
 
-# もし本文が取れなければsummaryを短縮して1文に
-if not picked:
-    picked = [normalize_jp(text)[:80]]
+    # 6) 環境変数（GitHub Secrets）からキーを読む
+    #    GitHub Secrets:
+    #    API_KEY / API_SECRET / ACCESS_TOKEN / ACCESS_TOKEN_SECRET
+    api_key = os.environ["API_KEY"]
+    api_secret = os.environ["API_SECRET"]
+    access_token = os.environ["ACCESS_TOKEN"]
+    access_token_secret = os.environ["ACCESS_TOKEN_SECRET"]
 
-body = "。".join(picked) + "。"
+    # 7) v2（投稿用）クライアント
+    client_v2 = tweepy.Client(
+        consumer_key=api_key,
+        consumer_secret=api_secret,
+        access_token=access_token,
+        access_token_secret=access_token_secret,
+    )
 
-# ✅リンクは必ず最後に
-url = entry.link
-tweet = f"{title}\n{body}\n\n全文はこちら\n{url}"
+    # 8) v1.1（画像アップロード用）API
+    #    ※Xは画像アップロードがv1.1のほうが扱いやすいので併用します
+    auth = tweepy.OAuth1UserHandler(
+        api_key,
+        api_secret,
+        access_token,
+        access_token_secret,
+    )
+    api_v1 = tweepy.API(auth)
 
-# 280を超えたら本文を短くする（リンクは残す）
-while len(tweet) > 280 and len(picked) > 1:
-    picked = picked[:-1]
-    body = "。".join(picked) + "。"
-    tweet = f"{title}\n{body}\n\n全文はこちら\n{url}"
+    # 9) 扉絵（og:image）を取得して添付（取れなければ画像なしで投稿）
+    media_id = None
+    og_img = get_og_image_url(link)
+    tmp_path = "/tmp/og_image.jpg"
 
-if len(tweet) > 280:
-    # それでも長い場合は本文をさらに削る
-    max_body = 280 - len(f"{title}\n\n全文はこちら\n{url}") - 2
-    body = body[:max(20, max_body)].rstrip("、。") + "…"
-    tweet = f"{title}\n{body}\n\n全文はこちら\n{url}"
+    if og_img:
+        if download_image(og_img, tmp_path):
+            try:
+                media = api_v1.media_upload(filename=tmp_path)
+                media_id = media.media_id_string
+            except Exception as e:
+                print(f"画像アップロードに失敗しました。画像なしで投稿します。理由: {e}")
 
+    # 10) 投稿（画像があれば添付）
+    if media_id:
+        client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
+        print("画像付きで投稿しました。")
+    else:
+        client_v2.create_tweet(text=tweet_text)
+        print("画像なしで投稿しました。")
 
-client = tweepy.Client(
-    consumer_key=os.environ["API_KEY"],
-    consumer_secret=os.environ["API_SECRET"],
-    access_token=os.environ["ACCESS_TOKEN"],
-    access_token_secret=os.environ["ACCESS_TOKEN_SECRET"],
-)
+    # 11) 投稿済みとして記録
+    posted.append(entry_id)
+    save_posted(posted)
+    print(f"投稿済みIDを保存しました: {entry_id}")
 
-client.create_tweet(text=tweet)
-
-posted.append(entry.id)
-save_posted(posted)
+if __name__ == "__main__":
+    main()
