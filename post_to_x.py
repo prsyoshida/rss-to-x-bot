@@ -2,6 +2,7 @@ import feedparser
 import json
 import os
 import tweepy
+import requests
 from bs4 import BeautifulSoup
 import re
 
