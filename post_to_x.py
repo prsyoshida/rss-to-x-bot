@@ -190,12 +190,22 @@ def main():
                 print(f"画像アップロードに失敗しました。画像なしで投稿します。理由: {e}")
 
     # 10) 投稿（画像があれば添付）
+    try:
     if media_id:
         client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
-        print("画像付きで投稿しました。")
     else:
         client_v2.create_tweet(text=tweet_text)
-        print("画像なしで投稿しました。")
+except tweepy.errors.Forbidden as e:
+    # 403の理由をログに出す（ここが重要）
+    print("403 Forbidden になりました。Xの応答内容を表示します。")
+    try:
+        print("status:", e.response.status_code)
+        print("body:", e.response.text)
+        print("headers:", dict(e.response.headers))
+    except Exception:
+        pass
+    raise
+
 
     # 11) 投稿済みとして記録
     posted.append(entry_id)
