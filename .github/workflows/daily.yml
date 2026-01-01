@@ -1,8 +1,8 @@
 name: Daily RSS to X
 
-on:
-  schedule:
-    - cron: "0 12 * * *" #JST21時　設定は＋９
+on:　　　　　　　#onになる条件
+  schedule:　　#onのスケジュール
+    - cron: "0 12 * * *" #Cronは自動投稿、JST21時　設定は＋９
   workflow_dispatch:
 
 jobs:
