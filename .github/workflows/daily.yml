@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "0 12 * * *"   # UTC12時 = JST21時
   workflow_dispatch:
+  
+  permissions:
+  contents: write
+
 
 jobs:
   post:
