@@ -7,22 +7,23 @@ on:
 
 jobs:
   post:
-    runs-on: self-hosted   # ★ここが重要（Macのrunnerを使う）
+    runs-on: self-hosted
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      # ★ setup-python を使わない ★
+      - name: Check Python
+        run: python3 --version
 
       - name: Install deps
-        run: pip install tweepy requests
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install tweepy requests
 
       - name: Run bot
-        run: python post_to_x.py
+        run: python3 post_to_x.py
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
