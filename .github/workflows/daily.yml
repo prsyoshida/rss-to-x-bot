@@ -3,11 +3,11 @@ name: Post to X
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"   # JST 9:00
+    - cron: "0 0 * * *"   # UTC 0:00 = JST 9:00
 
 jobs:
   post:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted   # ★ここが重要（Macのrunnerを使う）
 
     steps:
       - name: Checkout
