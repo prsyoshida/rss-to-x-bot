@@ -18,10 +18,10 @@ def main():
 
     # OAuth 1.0a (User context) for API v1.1
     auth = tweepy.OAuth1UserHandler(
-        os.environ["X_API_KEY"],
-        os.environ["X_API_SECRET"],
-        os.environ["X_ACCESS_TOKEN"],
-        os.environ["X_ACCESS_TOKEN_SECRET"],
+        os.environ["API_KEY"],
+        os.environ["API_SECRET"],
+        os.environ["ACCESS_TOKEN"],
+        os.environ["ACCESS_TOKEN_SECRET"],
     )
 
     api = tweepy.API(auth, wait_on_rate_limit=True)
