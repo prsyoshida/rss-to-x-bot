@@ -1,16 +1,29 @@
 import os
 import tweepy
 
-auth = tweepy.OAuth1UserHandler(
-    os.getenv("API_KEY"),
-    os.getenv("API_SECRET"),
-    os.getenv("ACCESS_TOKEN"),
-    os.getenv("ACCESS_TOKEN_SECRET"),
+def must_env(name: str) -> str:
+    v = os.getenv(name)
+    if not v:
+        raise RuntimeError(f"Missing env: {name}")
+    return v
+
+# ===== X API v2 クライアント =====
+client = tweepy.Client(
+    bearer_token=must_env("BEARER_TOKEN"),
+    consumer_key=must_env("API_KEY"),
+    consumer_secret=must_env("API_SECRET"),
+    access_token=must_env("ACCESS_TOKEN"),
+    access_token_secret=must_env("ACCESS_TOKEN_SECRET"),
 )
 
-api = tweepy.API(auth)
+# ===== 投稿内容（テスト）=====
+tweet_text = (
+    "【v2テスト投稿】\n"
+    "GitHub Actions からの自動投稿テストです。\n"
+    "#脂肪吸引 #豊胸 #美容外科"
+)
 
-me = api.verify_credentials()
-print("AUTH CHECK:", me.screen_name if me else "FAILED")
+# ===== 投稿 =====
+res = client.create_tweet(text=tweet_text)
 
-exit(0)
+print("POST SUCCESS:", res.data)
