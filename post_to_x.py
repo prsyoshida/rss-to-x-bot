@@ -1,6 +1,20 @@
 import os
 import tweepy
 
+import os
+import tweepy
+
+auth = tweepy.OAuth1UserHandler(
+    os.getenv("API_KEY"),
+    os.getenv("API_SECRET"),
+    os.getenv("ACCESS_TOKEN"),
+    os.getenv("ACCESS_TOKEN_SECRET"),
+)
+api = tweepy.API(auth)
+
+me = api.verify_credentials()
+print("AUTH OK:", me.screen_name if me else "None")
+
 def build_tweet() -> str:
     return (
         "脂肪吸引の合併症：知っておくべきポイントを専門医が解説\n"
