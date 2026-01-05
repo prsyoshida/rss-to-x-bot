@@ -13,11 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ★ setup-python を使わない ★
+      # self-hosted runner 前提なので setup-python は使わない
       - name: Check Python
         run: python3 --version
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install tweepy requests
@@ -25,7 +25,7 @@ jobs:
       - name: Run bot
         run: python3 post_to_x.py
         env:
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          API_KEY: ${{ secrets.API_KEY }}
+          API_SECRET: ${{ secrets.API_SECRET }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
